@@ -1,0 +1,56 @@
+# Logs
+# Python / Manim / Backend
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+.Python
+env/
+venv/
+.venv/
+backend/python-server/.venv/
+backend/python-server/.env
+backend/python-server/.pytest_cache/
+backend/python-server/__pycache__/
+backend/python-server/manim_generated_files/
+backend/manim_generated_files/
+
+# Generated media (videos, images)
+backend/python-server/media/
+public/media/
+media/
+*.mp4
+*.mov
+*.avi
+*.mkv
+
+# IDE / OS
+.env
+.env.*
+.idea/
+.DS_Store
+Thumbs.db
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

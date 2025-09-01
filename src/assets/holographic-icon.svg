@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="96" height="96" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="holographicGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4F46E5" stop-opacity="0.8" />
+      <stop offset="50%" stop-color="#8B5CF6" stop-opacity="0.6" />
+      <stop offset="100%" stop-color="#EC4899" stop-opacity="0.8" />
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="4" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+  <g filter="url(#glow)">
+    <circle cx="48" cy="48" r="40" fill="url(#holographicGradient)" />
+    <path 
+      d="M36 36C36 27.1634 43.1634 20 52 20C60.8366 20 68 27.1634 68 36C68 44.8366 60.8366 52 52 52C43.1634 52 36 44.8366 36 36Z" 
+      fill="white" 
+      fill-opacity="0.1"
+    />
+    <path 
+      d="M52 32C51.1716 32 50.5 31.3284 50.5 30.5C50.5 29.6716 51.1716 29 52 29C52.8284 29 53.5 29.6716 53.5 30.5C53.5 31.3284 52.8284 32 52 32Z" 
+      fill="white" 
+      fill-opacity="0.8"
+    />
+    <path 
+      d="M52 42C55.3137 42 58 39.3137 58 36C58 32.6863 55.3137 30 52 30C48.6863 30 46 32.6863 46 36C46 39.3137 48.6863 42 52 42Z" 
+      fill="white" 
+      fill-opacity="0.2"
+    />
+  </g>
+</svg>
