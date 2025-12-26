@@ -1,5 +1,6 @@
 from .sub_agents.code_writer.agent import code_writer
 from .sub_agents.script_writer.agent import script_writer
+from .sub_agents.code_fixer.agent import code_fixer
 from google.adk.agents.sequential_agent import SequentialAgent
 
 root_agent = SequentialAgent(

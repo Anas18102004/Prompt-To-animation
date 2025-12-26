@@ -54,6 +54,7 @@ app.mount("/media", StaticFiles(directory=str(media_path)), name="media")
 class ChatMessage(BaseModel):
     message: str
     user_id: Optional[str] = "user123"
+    session_id: Optional[str] = None
 
 class CodeRequest(BaseModel):
     filename: str
@@ -62,6 +63,7 @@ class CodeRequest(BaseModel):
 class VideoRequest(BaseModel):
     message: str
     user_id: Optional[str] = "user123"
+    code_filename: Optional[str] = None  # Optional: use existing saved code file
 
 # Global state for tracking video generation
 video_generation_status = {}
@@ -81,10 +83,16 @@ async def chat_endpoint(request: ChatMessage):
         # Initialize session
         db_url = "sqlite:///./my_agent_data.db"
         session_service = DatabaseSessionService(db_url=db_url)
-        session = await session_service.create_session(
-            app_name=app_name,
-            user_id=user_id
-        )
+        try:
+            session = await session_service.create_session(
+                app_name=app_name,
+                user_id=user_id,
+                session_id=request.session_id
+            )
+            session_id = session.id
+        except Exception:
+            # Session already exists, use the ID from request
+            session_id = request.session_id
         
         runner = Runner(
             agent=root_agent,
@@ -98,7 +106,7 @@ async def chat_endpoint(request: ChatMessage):
         responses = []
         async for event in runner.run_async(
             user_id=user_id,
-            session_id=session.id,
+            session_id=session_id,
             new_message=user_message
         ):
             if event.is_final_response():
@@ -113,29 +121,54 @@ async def chat_endpoint(request: ChatMessage):
         
         await runner.close()
         
-        # Process the response to extract code if present
+        # Process responses to extract chat and code
         code_content = ""
         chat_response = ""
         
+        # 1. Extract Chat Response (find [CHAT] anywhere in the response sequence)
+        for resp in responses:
+            if "[CHAT]" in resp:
+                chat_start = resp.find("[CHAT]") + 6
+                # Extract until next header or end
+                chat_end = resp.find("\n#", chat_start)
+                if chat_end == -1: 
+                    chat_end = resp.find("---", chat_start)
+                if chat_end == -1: 
+                    chat_end = len(resp)
+                
+                extracted_chat = resp[chat_start:chat_end].strip()
+                # Clean up bolding/tags
+                chat_response = extracted_chat.replace("**", "").replace(":", "", 1).strip()
+                break # Take the first [CHAT] found
+        
+        # 2. Extract Code Content (from the last response)
         if responses:
-            full_response = responses[-1]
+            last_resp = responses[-1]
+            if "```python" in last_resp:
+                c_start = last_resp.find("```python") + 9
+                c_end = last_resp.find("```", c_start)
+                if c_end != -1:
+                    code_content = last_resp[c_start:c_end].strip()
+            elif "from manim import" in last_resp or "class Introduce" in last_resp:
+                # Raw code fallback
+                code_content = last_resp.strip()
             
-            # Extract code blocks
-            if "```python" in full_response:
-                code_start = full_response.find("```python") + 9
-                code_end = full_response.find("```", code_start)
-                if code_end != -1:
-                    code_content = full_response[code_start:code_end].strip()
-                    chat_response = full_response.replace(f"```python\n{code_content}\n```", "").strip()
-                else:
-                    chat_response = full_response
-            else:
-                chat_response = full_response
+            # If we still don't have a chat response, use the last resp (but remove code)
+            if not chat_response:
+                if "```python" in last_resp:
+                    chat_response = last_resp.split("```python")[0].strip()
+                elif code_content:
+                    chat_response = "" # It's just code
+        
+        # Final fallback for chat
+        if not chat_response:
+            chat_response = "I've generated the animation code for you! Starting the render now..."
         
         return {
             "success": True,
             "chat_response": chat_response,
             "code_content": code_content,
+            "session_id": session_id,
             "timestamp": datetime.now().isoformat()
         }
         
@@ -159,7 +192,8 @@ async def generate_video_endpoint(request: VideoRequest, background_tasks: Backg
             process_video_generation,
             request.message,
             request.user_id,
-            generation_id
+            generation_id,
+            request.code_filename
         )
         
         return {
@@ -172,15 +206,29 @@ async def generate_video_endpoint(request: VideoRequest, background_tasks: Backg
         print(f"Video generation error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Video generation error: {str(e)}")
 
-async def process_video_generation(message: str, user_id: str, generation_id: str):
+async def process_video_generation(message: str, user_id: str, generation_id: str, code_filename: str | None = None):
     """Background task for video generation"""
     try:
         video_generation_status[generation_id]["status"] = "processing"
         video_generation_status[generation_id]["message"] = "Analyzing your request..."
         video_generation_status[generation_id]["progress"] = 10
         
+        # If code_filename is provided, read the saved code and use it
+        code_content = None
+        if code_filename:
+            try:
+                code_path = manim_files_path / code_filename
+                if code_path.exists():
+                    async with aiofiles.open(code_path, 'r', encoding='utf-8') as f:
+                        code_content = await f.read()
+                    print(f"Using existing code from {code_filename}")
+            except Exception as e:
+                print(f"Warning: Could not read code file {code_filename}: {e}")
+        
         # Generate video using existing function (now returns dict with video info)
-        result = await generate_video(message, generation_id=generation_id)
+        result = await generate_video(message, generation_id=generation_id, code_content=code_content)
+        
+        print(f"Video generation result for {generation_id}: {result}")
         
         video_generation_status[generation_id]["status"] = "completed"
         video_generation_status[generation_id]["message"] = "Video generated successfully!"
@@ -190,12 +238,42 @@ async def process_video_generation(message: str, user_id: str, generation_id: st
         if isinstance(result, dict):
             video_generation_status[generation_id]["filename"] = result.get("video_filename")
             video_generation_status[generation_id]["url"] = result.get("video_url")
+            print(f"Set status - filename: {result.get('video_filename')}, url: {result.get('video_url')}")
         
     except Exception as e:
-        print(f"Video generation background error: {str(e)}")
+        error_str = str(e)
+        print(f"Video generation background error: {error_str}")
+        import traceback
+        traceback.print_exc()
+        
+        # Create user-friendly error message
+        if "syntax" in error_str.lower() or "invalid python" in error_str.lower():
+            user_message = "The generated code has syntax errors. Please try a different animation description."
+        elif "manim command failed" in error_str.lower():
+            # Extract the actual error from the message
+            if "stderr:" in error_str:
+                # Try to extract a cleaner error message
+                parts = error_str.split("stderr:")
+                if len(parts) > 1:
+                    stderr_part = parts[1].strip()
+                    # Take first few lines that look like actual errors
+                    error_lines = [line for line in stderr_part.split('\n')[:5] 
+                                 if line.strip() and 'warning' not in line.lower()]
+                    if error_lines:
+                        user_message = f"Video generation failed: {error_lines[0][:200]}"
+                    else:
+                        user_message = "Video generation failed. Please check the code and try again."
+                else:
+                    user_message = "Video generation failed. Please try a different animation description."
+            else:
+                user_message = "Video generation failed. Please try again with a simpler animation description."
+        else:
+            user_message = f"Error: {error_str[:200]}" if len(error_str) > 200 else f"Error: {error_str}"
+        
         video_generation_status[generation_id]["status"] = "error"
-        video_generation_status[generation_id]["message"] = f"Error: {str(e)}"
+        video_generation_status[generation_id]["message"] = user_message
         video_generation_status[generation_id]["progress"] = 0
+        video_generation_status[generation_id]["error_details"] = error_str  # Keep full error for debugging
 
 @app.get("/video-status/{generation_id}")
 async def get_video_status(generation_id: str):
@@ -214,7 +292,12 @@ async def get_video_status(generation_id: str):
             "url": f"/media/videos/{video_path.name}",
         }
 
-    raise HTTPException(status_code=404, detail="Generation ID not found")
+    # Return pending status instead of 404 - generation might not have started yet
+    return {
+        "status": "pending",
+        "message": "Video generation not started yet",
+        "progress": 0
+    }
 
 @app.get("/video/{filename}")
 async def get_video(filename: str):
@@ -260,10 +343,29 @@ async def list_videos():
 async def save_code(request: CodeRequest):
     """Save code to file"""
     try:
+        import re
+        
+        # Sanitize code content - remove HTML/JSX/UI tokens
+        sanitized_content = request.content
+        try:
+            # Remove HTML-like tags and attributes
+            sanitized_content = re.sub(r'<[^>]+>', '', sanitized_content)  # Remove HTML tags
+            sanitized_content = re.sub(r'class\s*=\s*["\'][^"\']*["\']', '', sanitized_content)  # Remove class attributes
+            sanitized_content = re.sub(r'["\']text-[a-z]+-\d+["\']', '', sanitized_content)  # Remove Tailwind classes
+            sanitized_content = re.sub(r'["\']font-[a-z]+["\']', '', sanitized_content)  # Remove font classes
+            sanitized_content = re.sub(r'["\']span\s+class', '', sanitized_content)  # Remove span class patterns
+            sanitized_content = re.sub(r'<400">', '', sanitized_content)  # Remove specific problematic pattern
+            sanitized_content = re.sub(r'400">', '', sanitized_content)  # Remove leftover pattern
+            # Clean up formatting
+            sanitized_content = re.sub(r'\n\s*\n\s*\n', '\n\n', sanitized_content)  # Max 2 consecutive newlines
+            # REMOVED: sanitized_content = re.sub(r'  +', ' ', sanitized_content)  # This was breaking Python indentation
+        except Exception as e:
+            print(f"Warning: Error during code sanitization: {e}")
+        
         file_path = manim_files_path / request.filename
         
         async with aiofiles.open(file_path, 'w', encoding='utf-8') as f:
-            await f.write(request.content)
+            await f.write(sanitized_content)
         
         return {
             "success": True,

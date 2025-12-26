@@ -13,8 +13,8 @@ backend/python-server/.venv/
 backend/python-server/.env
 backend/python-server/.pytest_cache/
 backend/python-server/__pycache__/
-backend/python-server/manim_generated_files/
-backend/manim_generated_files/
+# backend/python-server/manim_generated_files/
+# backend/manim_generated_files/
 
 # Generated media (videos, images)
 backend/python-server/media/
